@@ -1,5 +1,5 @@
 {
-    "name": "stefanhoheisel/lexoffice-laravel",
+    "name": "hoheiselIT/lexoffice-laravel",
     "description": "Synchronize Laravel models with Lexoffice — contacts, invoices, and products via event-driven queue jobs.",
     "keywords": ["laravel", "lexoffice", "sync", "accounting", "invoices"],
     "license": "MIT",
