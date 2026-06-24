@@ -1,0 +1,52 @@
+{
+    "name": "stefanhoheisel/lexoffice-laravel",
+    "description": "Synchronize Laravel models with Lexoffice — contacts, invoices, and products via event-driven queue jobs.",
+    "keywords": ["laravel", "lexoffice", "sync", "accounting", "invoices"],
+    "license": "MIT",
+    "homepage": "https://github.com/stefanhoheisel/lexoffice-laravel",
+    "authors": [
+        {
+            "name": "Stefan Hoheisel",
+            "email": "stefan@hoheisel.it"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "illuminate/support": "^10.0|^11.0|^12.0",
+        "illuminate/http": "^10.0|^11.0|^12.0",
+        "illuminate/queue": "^10.0|^11.0|^12.0",
+        "illuminate/events": "^10.0|^11.0|^12.0",
+        "guzzlehttp/guzzle": "^7.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0|^9.0|^10.0",
+        "pestphp/pest": "^2.0|^3.0",
+        "pestphp/pest-plugin-laravel": "^2.0|^3.0",
+        "mockery/mockery": "^1.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "HoheiselIT\\Lexoffice\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "HoheiselIT\\Lexoffice\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "HoheiselIT\\Lexoffice\\LexofficeServiceProvider"
+            ],
+            "aliases": {
+                "Lexoffice": "HoheiselIT\\Lexoffice\\Facades\\Lexoffice"
+            }
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

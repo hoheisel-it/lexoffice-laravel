@@ -1,0 +1,291 @@
+# HoheiselIT Lexoffice Laravel
+
+> Laravel package that synchronizes Laravel models with the Lexoffice accounting API. Supports contacts, invoices, and products via event-driven queue jobs with automatic retry, sync logging, and incoming webhook handling.
+
+## Installation
+
+```bash
+composer require hoheiselIT/lexoffice-laravel
+php artisan vendor:publish --tag=lexoffice-config
+php artisan migrate
+```
+
+Add to `.env`:
+
+```env
+LEXOFFICE_API_KEY=your-api-key
+LEXOFFICE_QUEUE=lexoffice
+LEXOFFICE_WEBHOOK_SECRET=your-webhook-secret
+LEXOFFICE_WEBHOOK_PATH=lexoffice/webhook
+```
+
+## Core Concepts
+
+The package provides three layers:
+
+1. **Direct API access** via `LexofficeClient` (or `Lexoffice` facade) for raw Lexoffice API calls.
+2. **Model sync** via `HasLexofficeSync` trait + Contract interfaces — model saves automatically dispatch queue jobs.
+3. **Webhook handling** — incoming Lexoffice webhooks are verified, parsed, and dispatched as typed Laravel events.
+
+## Syncing Models
+
+Implement the correct contract on your Eloquent model and add the `HasLexofficeSync` trait. The trait hooks into the Eloquent `saved` event and dispatches a queue job automatically.
+
+### Contacts
+
+```php
+use HoheiselIT\Lexoffice\Contracts\SyncableContact;
+use HoheiselIT\Lexoffice\Traits\HasLexofficeSync;
+
+class Customer extends Model implements SyncableContact
+{
+    use HasLexofficeSync;
+
+    public function toLexofficeContact(): array
+    {
+        return [
+            'roles' => ['customer' => []],
+            'company' => ['name' => $this->company_name],
+            'emailAddresses' => ['business' => [$this->email]],
+        ];
+    }
+
+    public function getLexofficeId(): ?string
+    {
+        return $this->lexoffice_id;
+    }
+
+    public function setLexofficeId(string $id): void
+    {
+        $this->update(['lexoffice_id' => $id]);
+    }
+}
+```
+
+### Invoices
+
+```php
+use HoheiselIT\Lexoffice\Contracts\SyncableInvoice;
+use HoheiselIT\Lexoffice\Traits\HasLexofficeSync;
+
+class Order extends Model implements SyncableInvoice
+{
+    use HasLexofficeSync;
+
+    public function toLexofficeInvoice(): array
+    {
+        return [
+            'voucherDate' => $this->created_at->toIso8601String(),
+            'address' => [
+                'name' => $this->customer->company_name,
+                'contactId' => $this->customer->lexoffice_id,
+            ],
+            'lineItems' => $this->items->map(fn ($item) => [
+                'type' => 'custom',
+                'name' => $item->name,
+                'quantity' => $item->quantity,
+                'unitName' => 'Stück',
+                'unitPrice' => [
+                    'currency' => 'EUR',
+                    'netAmount' => $item->price_net,
+                    'taxRatePercentage' => 19,
+                ],
+            ])->toArray(),
+            'taxConditions' => ['taxType' => 'net'],
+            'totalPrice' => ['currency' => 'EUR'],
+        ];
+    }
+
+    public function getLexofficeId(): ?string
+    {
+        return $this->lexoffice_id;
+    }
+
+    public function setLexofficeId(string $id): void
+    {
+        $this->update(['lexoffice_id' => $id]);
+    }
+}
+```
+
+### Products
+
+```php
+use HoheiselIT\Lexoffice\Contracts\SyncableProduct;
+use HoheiselIT\Lexoffice\Traits\HasLexofficeSync;
+
+class Product extends Model implements SyncableProduct
+{
+    use HasLexofficeSync;
+
+    public function toLexofficeProduct(): array
+    {
+        return [
+            'title' => $this->name,
+            'description' => $this->description,
+            'type' => 'PRODUCT',
+            'unitName' => 'Stück',
+            'price' => [
+                'netPrice' => $this->price,
+                'currency' => 'EUR',
+                'leadingPrice' => 'NET',
+            ],
+        ];
+    }
+
+    public function getLexofficeId(): ?string
+    {
+        return $this->lexoffice_id;
+    }
+
+    public function setLexofficeId(string $id): void
+    {
+        $this->update(['lexoffice_id' => $id]);
+    }
+}
+```
+
+## Manual Sync
+
+```php
+// Sync immediately (synchronous, bypasses queue):
+$customer->syncToLexoffice();
+
+// Dispatch to queue manually:
+use HoheiselIT\Lexoffice\Jobs\SyncContactJob;
+SyncContactJob::dispatch($customer);
+```
+
+## Artisan Command
+
+```bash
+# Sync all models of a class:
+php artisan lexoffice:sync "App\Models\Customer"
+
+# Sync specific IDs only:
+php artisan lexoffice:sync "App\Models\Customer" --ids=1 --ids=2
+```
+
+## Direct API Access (Facade)
+
+```php
+use HoheiselIT\Lexoffice\Facades\Lexoffice;
+
+// Contacts
+$contact  = Lexoffice::contacts->find('uuid');
+$contacts = Lexoffice::contacts->search(email: 'max@example.com');
+$created  = Lexoffice::contacts->create([...]);
+$updated  = Lexoffice::contacts->update('uuid', [...]);
+
+// Invoices
+$invoice  = Lexoffice::invoices->create([...]);
+$invoice  = Lexoffice::invoices->finalize($invoice['id']);
+$document = Lexoffice::invoices->renderDocument($invoice['id']);
+
+// Voucher list
+$list = Lexoffice::vouchers->list();
+
+// Webhook subscriptions
+Lexoffice::webhooks->subscribe('contact.changed', 'https://your-app.com/lexoffice/webhook');
+Lexoffice::webhooks->list();
+Lexoffice::webhooks->unsubscribe($subscriptionId);
+```
+
+## Webhooks
+
+Incoming webhooks from Lexoffice are received at `POST /lexoffice/webhook`. The route is auto-registered. The `X-Lxo-Signature` header is verified via HMAC-SHA256 using `LEXOFFICE_WEBHOOK_SECRET`.
+
+Listen for typed events in `EventServiceProvider`:
+
+```php
+use HoheiselIT\Lexoffice\Events\Webhooks\ContactChanged;
+use HoheiselIT\Lexoffice\Events\Webhooks\ContactCreated;
+use HoheiselIT\Lexoffice\Events\Webhooks\ContactDeleted;
+use HoheiselIT\Lexoffice\Events\Webhooks\InvoiceChanged;
+use HoheiselIT\Lexoffice\Events\Webhooks\InvoiceCreated;
+use HoheiselIT\Lexoffice\Events\Webhooks\InvoiceDeleted;
+use HoheiselIT\Lexoffice\Events\Webhooks\PaymentChanged;
+use HoheiselIT\Lexoffice\Events\Webhooks\VoucherChanged;
+
+protected $listen = [
+    ContactChanged::class => [YourContactSyncListener::class],
+    InvoiceChanged::class => [YourInvoiceListener::class],
+    PaymentChanged::class => [YourPaymentListener::class],
+];
+```
+
+Each event has: `$event->eventType`, `$event->resourceId`, `$event->organizationId`, `$event->payload`.
+
+Unknown event types fire `LexofficeWebhookReceived` as fallback.
+
+## Sync Log
+
+Every sync attempt is written to the `lexoffice_sync_log` database table.
+
+```php
+use HoheiselIT\Lexoffice\Models\LexofficeSyncLog;
+
+// All failures:
+LexofficeSyncLog::failed()->latest()->get();
+
+// History for a model:
+LexofficeSyncLog::forModel(Customer::class, $id)->get();
+
+// Last successful sync:
+LexofficeSyncLog::forModel(Customer::class, $id)->successful()->latest()->first();
+```
+
+Log columns: `model_type`, `model_id`, `lexoffice_id`, `sync_type` (contact/invoice/product), `status` (success/failed), `payload` (JSON), `error` (string).
+
+## Events Fired by the Package
+
+| Event | When |
+|-------|------|
+| `LexofficeSynced` | After every successful outbound sync (contact/invoice/product) |
+| `LexofficeWebhookReceived` | After every incoming webhook (fallback for unknown types) |
+| `ContactCreated/Changed/Deleted` | Incoming webhook for contacts |
+| `InvoiceCreated/Changed/Deleted` | Incoming webhook for invoices |
+| `PaymentChanged` | Incoming webhook for payment status changes |
+| `VoucherChanged` | Incoming webhook for voucher changes |
+
+## Configuration Reference
+
+```php
+// config/lexoffice.php
+return [
+    'api_key'  => env('LEXOFFICE_API_KEY'),
+    'base_url' => env('LEXOFFICE_BASE_URL', 'https://api.lexoffice.io/v1'),
+
+    'queue' => [
+        'connection' => env('LEXOFFICE_QUEUE_CONNECTION', null),
+        'name'       => env('LEXOFFICE_QUEUE', 'lexoffice'),
+    ],
+
+    'retry' => [
+        'times' => 3,   // job retry attempts
+        'sleep' => 5,   // seconds between retries
+    ],
+
+    'sync' => [
+        'contacts' => true,
+        'invoices' => true,
+        'products' => true,
+    ],
+
+    'webhook' => [
+        'secret'     => env('LEXOFFICE_WEBHOOK_SECRET'),
+        'path'       => env('LEXOFFICE_WEBHOOK_PATH', 'lexoffice/webhook'),
+        'middleware' => ['api'],
+    ],
+];
+```
+
+## Exceptions
+
+| Exception | When |
+|-----------|------|
+| `LexofficeAuthException` | API key invalid (HTTP 401) |
+| `LexofficeRateLimitException` | Rate limit hit (HTTP 429) — job retries automatically |
+| `LexofficeApiException` | Any other API error |
+
+All exceptions extend `LexofficeApiException extends RuntimeException`.
