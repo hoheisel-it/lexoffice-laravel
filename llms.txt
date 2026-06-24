@@ -262,8 +262,9 @@ return [
     ],
 
     'retry' => [
-        'times' => 3,   // job retry attempts
-        'sleep' => 5,   // seconds between retries
+        'times'           => 3,
+        'backoff_base'    => 5,  // exponential: 5s → 10s → 20s
+        'rate_limit_base' => 30, // exponential on 429: 30s → 60s → 120s
     ],
 
     'sync' => [
@@ -285,7 +286,7 @@ return [
 | Exception | When |
 |-----------|------|
 | `LexofficeAuthException` | API key invalid (HTTP 401) |
-| `LexofficeRateLimitException` | Rate limit hit (HTTP 429) — job retries automatically |
+| `LexofficeRateLimitException` | Rate limit hit (HTTP 429) — job retries with exponential backoff: 30s → 60s → 120s |
 | `LexofficeApiException` | Any other API error |
 
 All exceptions extend `LexofficeApiException extends RuntimeException`.

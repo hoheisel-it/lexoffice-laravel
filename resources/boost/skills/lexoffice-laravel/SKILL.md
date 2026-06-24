@@ -210,6 +210,6 @@ LexofficeSyncLog::forModel(Customer::class, $id)->successful()->latest()->first(
 
 - Always store the returned Lexoffice UUID in `lexoffice_id` on the model.
 - The `toLexoffice*()` methods must return a valid Lexoffice API payload — check the Lexoffice API docs for required fields.
-- On `RateLimitException` the queue job retries automatically (default: 3 attempts, 5s backoff).
+- On HTTP 429 (`LexofficeRateLimitException`) jobs use exponential backoff: 30s → 60s → 120s. Other errors: 5s → 10s → 20s. Both configurable via `retry.rate_limit_base` and `retry.backoff_base`.
 - Never call `toLexoffice*()` or `setLexofficeId()` directly — use the trait or job dispatch pattern.
 - Sync can be disabled per type in `config/lexoffice.php` under `sync.contacts`, `sync.invoices`, `sync.products`.

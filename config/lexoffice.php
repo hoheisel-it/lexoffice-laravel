@@ -11,8 +11,9 @@ return [
     ],
 
     'retry' => [
-        'times' => 3,
-        'sleep' => 5,
+        'times'              => 3,
+        'backoff_base'       => 5,  // seconds; doubles per attempt: 5s → 10s → 20s
+        'rate_limit_base'    => 30, // seconds for 429 responses: 30s → 60s → 120s
     ],
 
     'sync' => [
